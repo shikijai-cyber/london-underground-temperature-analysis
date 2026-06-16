@@ -1,0 +1,253 @@
+---
+title: "Underground_Temperature_report"
+author: "Shikhar Jaiswal"
+date: '`r Sys.Date()`'
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,    
+  warning = FALSE,   
+  message = FALSE)
+```
+# Underground Temperature Analysis {.tabset}
+
+## Code and Output (Section 1)
+
+```{r}
+library(tidyverse) 
+library(lubridate) 
+library(knitr)
+```
+
+```{r Filtering}
+raw_data <- read_csv("data/raw/Underground.csv", na = "NA")
+
+```
+
+| Variable | Data Type (Raw) | Description |
+| :--- | :--- | :--- |
+| `ID` | Character | A unique identifier for each temperature reading. |
+| `Month` | Character | The full name of the month the reading was taken (e.g., "January"). |
+| `Year` | Numeric | The four-digit year the reading was taken. |
+| `Line` | Character | The name of the London Underground line (e.g., "Bakerloo", "Central"). |
+| `Temp` | Character | The temperature reading, which is read as text and converted to numeric for analysis. All values are in degrees Celsius (°C). |
+
+```{r Data Cleaning and Filtering}
+
+data_cleaned <- raw_data %>%
+  
+  # Create a proper 'Date' column for time-series plotting
+  mutate(
+    Month = factor(Month, levels = month.name),
+    # Create a full date by pasting day, month, year. We'll just use the 1st of each month.
+    Date = dmy(paste("01", Month, Year))
+  ) %>%
+  
+  #  Ensure Temp is numeric
+  mutate(Temp = as.numeric(Temp)) %>%
+  
+  #  Drop rows with missing critical data
+  drop_na(ID, Temp, Date)
+  
+```
+
+```{r raw data plotting}
+raw_data_plot <-ggplot(data_cleaned, aes(x = "Raw Data", y = Temp)) +
+  geom_jitter(width = 0.1, alpha = 0.5, color = "dodgerblue") +
+  labs(
+    title = "All Raw Temperature Readings (Before Filtering)",
+    subtitle = "Illustrating the extreme outliers (e.g., > 200°C)",
+    x = "All lines", 
+    y = "Temperature (°C)") +theme_minimal() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+          
+print(raw_data_plot)
+```
+
+```{r}
+ data_filtered_cleaned <- data_cleaned %>%
+  filter(Temp >= 5 & Temp <= 50)
+
+glimpse(data_filtered_cleaned)
+
+```
+
+```{r checking the filtered out values}
+data_cleaned_for_check <- raw_data %>%
+mutate(Temp = as.numeric(Temp))
+  
+
+# Now, filter for the rows that are *outside* the valid range
+filtered_out_values <- data_cleaned_for_check %>%
+  filter(Temp < 5 | Temp > 50) 
+
+print(filtered_out_values)
+#We can clearly see that the filter correctly identified and removed clear data errors, like temperatures of 206.30C and 246.70 C, as well as the unusually low values like 0.27 C and 1.05 C.
+```
+
+```{r Summary,}
+
+summary_table <- data_filtered_cleaned %>%
+  group_by(Line) %>%
+  summarise(
+    `Mean Temp (°C)` = mean(Temp),
+    `Std Dev (°C)` = sd(Temp),
+    `Min Temp (°C)` = min(Temp),
+    `Max Temp (°C)` = max(Temp))
+
+data_filtered_cleaned <- data_filtered_cleaned %>% 
+  filter(Line != "Sub-surface_lines")
+```
+
+```{r Plotting}
+dist_plot <- ggplot(data_filtered_cleaned, aes(x = Line, y = Temp, color = Line)) +
+  
+  geom_jitter(width = 0.15, alpha = 0.4) +
+  
+  geom_boxplot(fill = NA, outlier.shape = NA, color = "black", lwd = 1) +
+  
+  # Add mean +/- 1 standard deviation points
+  stat_summary(
+    fun.data = "mean_sdl",
+    fun.args = list(mult = 1),
+    geom = "pointrange",
+    color = "black",
+    size = 0.8
+  ) +
+  
+  labs(
+    title = "Temperature Distribution by Underground Line",
+    subtitle = "Showing all data points, boxplot (IQR), and mean +/- 1 SD (black bars)",
+    x = "Underground Line",
+    y = "Temperature (°C)"
+  ) +
+  
+  theme_minimal() +
+  
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+print(dist_plot)
+```
+
+```{r Filtering two lines}
+data_time_series <- data_filtered_cleaned %>%
+  filter(Line %in% c("Bakerloo", "Central"))
+
+time_series_plot <- ggplot(data_time_series, 
+                           aes(x = Date, y = Temp, color = Line)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", se = FALSE, span = 0.5, lwd = 1.2) +
+  scale_color_manual(values = c("Bakerloo" = "#B36305", "Central" = "#E32017")) +
+  labs(
+    title = "Temperature Trends: Bakerloo vs. Central (2013-2024)",
+    subtitle = "Monthly average temperatures with LOESS smoothing line",
+    x = "Year",
+    y = "Temperature (°C)",
+    color = "Line"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+print(time_series_plot)
+```
+
+```{r T.test 1}
+# All year T.test
+test_all_year <- t.test(Temp ~ Line, data = data_filtered_cleaned %>% 
+  filter(Line %in% c("Bakerloo", "Central")))
+print("All-Year T-Test")
+print(test_all_year)
+```
+
+```{r T.test 2}
+# Summer T.test
+summer_months <- c("May", "June", "July", "August")
+data_summer <- data_filtered_cleaned %>% 
+  filter(
+    Month %in% summer_months, 
+    Line %in% c("Bakerloo", "Central"))
+test_summer <- t.test(Temp ~ Line, data = data_summer)
+print("Summer-Only T-Test")
+print(test_summer)
+```
+## Report (Section 2)
+
+### Executive Summary
+>This report analyses historical temperature data from the London Underground to recommend a line for a new air-cooling system pilot. Analysis of all-year data suggests the Bakerloo line is warmer, but a more focused analysis on the key summer months—when cooling is most critical—reveals **no statistically significant difference** between the two.
+
+> Based on this, **Bakerloo line would be a more suitable candidate for the air_cooling system pilot**.
+
+
+### Summary Table
+```{r , echo=FALSE}
+# This chunk simply PRINTS the 'summary_table' we already made
+kable(summary_table, digits = 2, caption = "Summary of Monthly Average Temperatures by Line")
+```
+
+--- 
+
+### Distribution of Temperatures
+
+This chart showcases all ranges of temperatures for each line (excluding Sub-Surface). The black dot represents the average temperature, and the black bar shows the standard deviation. This chart confirms that the Bakerloo, Central, and Victoria lines have the highest and most varied temperatures.
+
+```{r,echo=FALSE}
+print(dist_plot)
+```
+
+---
+
+### Temperature Trends Over Time (Bakerloo vs. Central)
+
+Looking at the pattern and to determine that if the problem is worsening, we plotted temperatures for the Bakerloo and Central lines from 2013 to 2024. The data reveals a distinct seasonal pattern and a slight upward trend, showcasing that tunnel temperatures have slowly risen over time. Moreover, the temperature difference between the two lines stays nearly constant for about a given 11-year period, with both moving in parallel and showing similar seasonal fluctuations.
+
+However we did t-tests just to conclude for the report which will provide clear answer.
+
+```{r,echo=FALSE}
+print(time_series_plot)
+```
+
+---
+
+### Statistical Comparison: Bakerloo vs. Central
+To make a final decision, we performed two direct statistical comparisons.
+
+#### A. All-Year Analysis
+Firstly, we compared the average temperatures using all the data from all months. The analysis found a statistically significant difference **(t(279.59)=2.25, p=0.025)**. 
+
+The test describes that the Bakerloo line **(Mean = $26.83^{\circ}$C) is, on average, slightly hotter than the Central line (Mean = $26.10^{\circ}$C) over the full year provided in data**.
+
+#### B. Summer-Only Analysis (May - August)
+Since an air-cooling system is for summer, we ran a second, more focused test using only data from May to August for each year.This analysis had **no statistically significant difference (t(91.82)=0.12,p=0.908)**. **The average summer temperatures (Bakerloo Mean = $28.74^{\circ}$C, Central Mean = $28.70^{\circ}$C) are nearly similar**.
+
+This finding indicates that during the hottest and warmest time of the year, the little temperature difference observed is mostly because the result of random variation. That is why we cannot conclude that if any of the both line is hotter than the other in summer.
+
+---
+
+### Conclusion
+
+While the all-year data suggests the Bakerloo line is warmer, the more relevant summer-only analysis shows no statistical difference between the Bakerloo and Central lines.
+
+Therefore, based only on this temperature data, **The Bakerloo line would be a valid choice for the cool air pilot**. The decision can be confidently made based on the above analysis we did.
+
+
+---
+
+##### Declaration on the Use of Artificial Intelligence
+- WHY: I used Generative AI as my programming assistant and to understand concepts.
+- WHICH: The AI I used was Google's Gemini.
+- WHAT: It was used to: Debug R code, specifically for all the errors related to data plotting and wrangling.
+- WHERE: The AI-generated codeand interpretations were used as a reference to fit the project's context. All final code and written analysis in this submission are my own work, and I hold intellectual ownership of them.
+
+
+
+
+
+---
+
+
